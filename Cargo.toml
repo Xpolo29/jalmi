@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 iced = "0.13.1"
+iced_aw = "0.12.2"
 reqwest = "0.12.14"
 serde = "1.0.219"
 serde_yaml = "0.9.34"
