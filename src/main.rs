@@ -20,6 +20,8 @@ use modules::{
     llm::llm::LocalAiClient,
 };
 use log::{error, warn, info, debug, trace};
+use env_logger::{Builder, Env};
+use std::env;
 
 struct AppState {
     text_content: Content,
@@ -52,7 +54,9 @@ pub enum Message {
 }
 
 fn main() -> iced::Result {
+    env::set_var("RUST_LOG", "jalmi=trace,none");
     colog::init();
+
     info!("App is starting");
     iced::application("Jalmi (Just Another Language Model Interface)", update, view)
         .theme(|_| theme::get_default_theme())
@@ -60,10 +64,11 @@ fn main() -> iced::Result {
 }
 
 fn update(state: &mut AppState, message: Message) -> iced::Task<Message> {
-    trace!("Received message {:?}", message);
+    debug!("Received message {:?}", message);
     match message {
         // Text input
         Message::TextInputChanged(action) => {
+            
             state.text_content.perform(action);
         },
         // Model selection

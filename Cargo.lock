@@ -2007,6 +2007,7 @@ name = "jalmi"
 version = "0.1.0"
 dependencies = [
  "colog",
+ "env_logger",
  "iced",
  "iced_aw",
  "iced_futures",
