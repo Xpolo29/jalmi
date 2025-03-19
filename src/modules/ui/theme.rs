@@ -1,12 +1,15 @@
 use iced::{Color, Theme};
-
 /// Represents the application's color scheme
 pub struct AppColors {
+    pub top: Color,
+    pub bottom: Color,
+    pub bubble_left: Color,
+    pub bubble_right: Color,
+    pub model: Color,
+    pub text_input: Color,
+    pub font_color: Color,
     pub background: Color,
-    pub text: Color,
-    pub primary: Color,
-    pub secondary: Color,
-    pub accent: Color,
+    pub border: Color,
     pub error: Color,
 }
 
@@ -14,19 +17,23 @@ impl AppColors {
     /// Creates the default color scheme
     pub fn default() -> Self {
         Self {
-            background: Color::from_rgb(0.95, 0.95, 0.95),
-            text: Color::from_rgb(0.2, 0.2, 0.2),
-            primary: Color::from_rgb(0.4, 0.6, 0.8),
-            secondary: Color::from_rgb(0.3, 0.7, 0.5),
-            accent: Color::from_rgb(0.8, 0.5, 0.3),
-            error: Color::from_rgb(0.8, 0.3, 0.3),
+            top: Color::from_rgb(0.25, 0.35, 0.55),       // Deep blue-gray for top area
+            bottom: Color::from_rgb(0.25, 0.35, 0.55),       // Deep blue-gray for top area
+            bubble_left: Color::from_rgb(0.81, 0.99, 0.74), // Very Pale Green
+            bubble_right: Color::from_rgb(0.961, 0.961, 0.863), // Beige
+            model: Color::from_rgb(1.0, 1.0, 1.0),   // Pure white for text input background
+            text_input: Color::from_rgb(1.0, 1.0, 1.0),   // Pure white for text input background
+            font_color: Color::from_rgb(0.15, 0.15, 0.2), // Dark navy for text
+            background: Color::from_rgb(0.3, 0.3, 0.3), // Medium Gray (#717171), 
+            error: Color::from_rgb(1.0, 0.4, 0.8),        // Flashy pink (to identify when used incorrectly)
+            border: Color::from_rgb(0.3, 0.3, 0.4),       // Dark slate gray for borders
         }
     }
 }
 
 /// Font-related configurations
 pub struct AppFonts {
-    pub default_size: f32,
+    pub font_size: f32,
     pub header_size: f32,
     pub small_size: f32,
 }
@@ -35,7 +42,7 @@ impl AppFonts {
     /// Creates the default font configuration
     pub fn default() -> Self {
         Self {
-            default_size: 16.0,
+            font_size: 16.0,
             header_size: 24.0,
             small_size: 12.0,
         }
@@ -90,9 +97,9 @@ pub fn get_default_theme() -> Theme {
     // Convert to Iced palette
     let palette = iced::theme::Palette {
         background: colors.background,
-        text: colors.text,
-        primary: colors.primary,
-        success: colors.secondary,
+        text: colors.font_color,
+        primary: colors.bubble_right,
+        success: colors.model,
         danger: colors.error,
     };
 
@@ -101,28 +108,44 @@ pub fn get_default_theme() -> Theme {
 
 /// Helper functions for quick access to theme properties
 
+pub fn top() -> Color {
+    current_theme().colors.top
+}
+
+pub fn bottom() -> Color {
+    current_theme().colors.bottom
+}
+
+pub fn bubble_left() -> Color {
+    current_theme().colors.bubble_left
+}
+
+pub fn bubble_right() -> Color {
+    current_theme().colors.bubble_right
+}
+
+pub fn model() -> Color {
+    current_theme().colors.model
+}
+
+pub fn text_input() -> Color {
+    current_theme().colors.text_input
+}
+
+pub fn font_color() -> Color {
+    current_theme().colors.font_color
+}
+
 pub fn background() -> Color {
     current_theme().colors.background
 }
 
-pub fn text() -> Color {
-    current_theme().colors.text
-}
-
-pub fn primary() -> Color {
-    current_theme().colors.primary
-}
-
-pub fn secondary() -> Color {
-    current_theme().colors.secondary
-}
-
-pub fn accent() -> Color {
-    current_theme().colors.accent
-}
-
 pub fn error() -> Color {
     current_theme().colors.error
+}
+
+pub fn font_size() -> f32 {
+    current_theme().fonts.font_size
 }
 
 pub fn default_padding() -> f32 {
@@ -133,6 +156,6 @@ pub fn default_spacing() -> f32 {
     current_theme().spacing.spacing
 }
 
-pub fn default_font_size() -> f32 {
-    current_theme().fonts.default_size
+pub fn border() -> Color {
+    current_theme().colors.border
 }
