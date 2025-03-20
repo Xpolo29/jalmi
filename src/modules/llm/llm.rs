@@ -59,7 +59,7 @@ impl LocalAiClient {
         })
     }
 
-    pub fn stream_completion(&self, history: &Vec<(String, bool)>, model: &String) -> iced::Task<Message> {
+    pub fn stream_completion(&self, history: &Vec<(String, bool)>, model: &String) -> (iced::Task<Message>, iced::task::Handle) {
         let url = format!("{}/v1/chat/completions", self.base_url);
         let history  = history.clone();
         let model = model.clone();
@@ -135,9 +135,11 @@ impl LocalAiClient {
                 }
             }
         );
-        
+
         // Create a Task from the stream
-        iced::Task::run(stream, |msg| msg)
+        let task = iced::Task::run(stream, |msg| msg);
+        
+        task.abortable() 
     }
     
     // Helper function to process a line from the response

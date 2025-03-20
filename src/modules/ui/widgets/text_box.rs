@@ -1,8 +1,11 @@
+use iced::widget::shader::wgpu::naga::back;
 use iced::widget::text_editor;
-use text_editor::{Action, Style, Content, Binding};
+use text_editor::{Action, Style, Content, Binding, Motion};
 use iced::border::Radius;
 use iced::keyboard::key::{Key, Named};
-use iced::{Background, Border, Element, Length, Theme};
+use iced::{Background, Border, Element, Length, Color};
+
+use std::cmp::max;
 
 use super::super::theme;
 
@@ -12,7 +15,8 @@ pub fn rounded_text_box<'a, Message>(
     value: &'a Content,
     placeholder: &'a str,
     on_change: impl Fn(Action) -> Message + 'a,
-    on_enter: Message
+    on_enter: Message,
+    is_active: bool,
 ) -> Element<'a, Message> 
 where
     Message: Clone + 'static,
@@ -22,16 +26,21 @@ where
     .on_action(move |action| on_change(action))
     .padding(10)
     .height(Length::Fixed(100.))
-    .style(|_, status| {
-        let default = text_editor::default(&theme::get_default_theme(), status);
+    .style(move |_, status| {
+        let default: Style = text_editor::default(&theme::get_default_theme(), status);
         Style {
             border: Border {
                 radius: Radius::from(15.0),
                 color: theme::border(),
                 ..default.border
             },
-            background: Background::Color(theme::text_input()),
-            value: theme::font_color(),
+            background: Background::Color(if is_active {
+                theme::text_input()
+            } else {
+                let color = theme::text_input();
+                Color::from_rgba(color.r * 0.7, color.g * 0.7, color.b * 0.7, color.a)
+            }),
+                        value: theme::font_color(),
             ..default
         }
     })
@@ -40,38 +49,38 @@ where
         match key_press.key {
             Key::Named(Named::Delete) => {
                 if key_press.modifiers.control() {
-                    // Ctrl+Delete deletes the word to the right
-                    let word_length = count_characters(value, false);
-                    let delete_sequence = (0..word_length)
-                        .map(|_| Binding::Delete)
+                    let count = count_characters(value, true);
+                    let mut backspace_sequence: Vec<Binding<Message>> = (0..count)
+                        .map(|_| Binding::Select(Motion::Right))
                         .collect();
-                    
-                    Some(Binding::Sequence(delete_sequence))                
+
+                    backspace_sequence.push(Binding::Select(Motion::WordRight));
+                    backspace_sequence.push(Binding::Delete);
+
+                    Some(Binding::Sequence(backspace_sequence))              
                 } else {
-                    // Regular Delete behavior
                     Some(Binding::Delete)
                 }
             },
             Key::Named(Named::Backspace) => {
                 if key_press.modifiers.control() {
-                    // Create a sequence of Backspace operations to delete a word
-                    let word_length = count_characters(value, true);
-                    let backspace_sequence = (0..word_length)
-                        .map(|_| Binding::Backspace)
+                    let count = count_characters(value, true);
+                    let mut backspace_sequence: Vec<Binding<Message>> = (0..count)
+                        .map(|_| Binding::Select(Motion::Left))
                         .collect();
-                    
+
+                    backspace_sequence.push(Binding::Select(Motion::WordLeft));
+                    backspace_sequence.push(Binding::Delete);
+
                     Some(Binding::Sequence(backspace_sequence))
                 } else {
-                    // Regular Backspace behavior
                     Binding::from_key_press(key_press)
                 }
             },
             Key::Named(Named::Enter) => {
                 if key_press.modifiers.shift() {
-                    // Let Shift+Enter use the default behavior
                     Binding::from_key_press(key_press)
                 } else {
-                    // Custom behavior for Enter without Shift
                     Some(Binding::Custom(on_enter.clone()))
                 }
             },
@@ -81,44 +90,53 @@ where
     .into()
 }
 
+
+
 fn count_characters(content: &Content, is_backspace: bool) -> usize {
-    let mut count = 0;
+    let mut count: usize = 0;
 
-    let (line_number, index) = content.cursor_position();
-
+    let (line_number, mut index) = content.cursor_position();
     let lines_vec = content.lines().collect::<Vec<_>>();
     let reversed = lines_vec[0..=line_number].iter().rev();
 
-
+    let mut first_line = true;
     for line in reversed {
+
         let text: &str = &*line;
         let size: i32 = text.chars().count().try_into().unwrap();
-        trace!("Size of {} is {}", text, size);
+        let mut local_count: i32 = 0;
 
-        if size <= 1 {
-            count += 1;
-            continue;
-        }
+        if !first_line {index = max(size, 0) as usize;}
+
+        //trace!("Size of {} is {}", text, size);
 
         let increment: i32 = if is_backspace {-1} else {1};
         let mut index: i32 = index.try_into().unwrap();
-
         if is_backspace { index += increment;}
 
+        // Delete until on a word or end of line
         while index + increment >= -1 && index + increment <= size {
             let char = text.chars().nth(index as usize).unwrap_or(char::from_u32(0).unwrap());
-            trace!("Browsing char {} at index {}", char, index);
-
-            if char.is_alphanumeric() || char == '_' {
+            //trace!("Browsing char {} at index {}", char, index);
+            if char == ' ' {
                 count += 1;
                 index += increment;
+                local_count += 1;
             } else {
                 break;
             }
         }
+
+        // Delete until on a line
+        if size - local_count <= 1 {
+            //trace!("Size of {} is {} with count {}", text, size, local_count);
+            count += 1;
+            first_line = false;
+            continue;
+        }
         break;
     }
 
-    debug!("Counter {} chars to delete", count);
+    //debug!("Counted {} chars to delete", count);
     return count;
 }

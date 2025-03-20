@@ -1,11 +1,9 @@
 mod modules;
 
 use iced::{
-    overlay::menu, widget::{
+    border::Radius, overlay::menu, task::{self, Handle}, widget::{
         column, combo_box, container, row, scrollable, text_editor::{Action, Content}, text_input::{self, Status}, Column, ComboBox
-    }, 
-    Background, Element, Length, Padding, Theme, Border,
-    border::Radius,
+    }, window, Alignment, Background, Border, Element, Length, Padding, Settings, Size, Task, Theme
 };
 
 use modules::{
@@ -13,6 +11,7 @@ use modules::{
         widgets::{
             bubble::text_bubble,
             text_box::rounded_text_box,
+            toggle_button::toggle_button,
         },
         theme,
     },
@@ -29,6 +28,7 @@ struct AppState {
     selected_model: Option<String>,
     history: Vec<(String, bool)>,
     client: LocalAiClient,
+    is_streaming: Option<Handle>,
 }
 
 impl Default for AppState {
@@ -40,6 +40,7 @@ impl Default for AppState {
             text_content: Content::new(),
             history: Vec::new(),
             client: LocalAiClient::new(),
+            is_streaming: None,
         }
     }
 }
@@ -48,9 +49,12 @@ impl Default for AppState {
 pub enum Message {
     TextInputChanged(Action),
     OptionSelected(String),
-    EnterPressed,
+    Generate,
     ReceivedChunk(String),
     StreamCompleted,
+    StreamStop,
+    Regenerate,
+    None,
 }
 
 fn main() -> iced::Result {
@@ -60,11 +64,15 @@ fn main() -> iced::Result {
     info!("App is starting");
     iced::application("Jalmi (Just Another Language Model Interface)", update, view)
         .theme(|_| theme::get_default_theme())
-        .run()
+        .window(window::Settings {
+            min_size: Some(Size::new(300.0, 400.0)), 
+            ..Default::default()
+        }).run()
 }
 
+// Update Model method
 fn update(state: &mut AppState, message: Message) -> iced::Task<Message> {
-    debug!("Received message {:?}", message);
+    // debug!("Received message {:?}", message);
     match message {
         // Text input
         Message::TextInputChanged(action) => {
@@ -76,10 +84,10 @@ fn update(state: &mut AppState, message: Message) -> iced::Task<Message> {
             state.selected_model = Some(selected);
         },
         // Enter pressed
-        Message::EnterPressed => {
+        Message::Generate => {
             let text = state.text_content.text();
             
-            if !text.trim().is_empty() && state.selected_model.is_some() {
+            if !text.trim().is_empty() && state.selected_model.is_some() && !state.is_streaming.is_some() {
                 // Add user prompt
                 state.history.push((text.to_string(), false));
                 state.text_content = Content::new();
@@ -89,8 +97,10 @@ fn update(state: &mut AppState, message: Message) -> iced::Task<Message> {
                 
                 // Call stream_completion and return the task
                 let model = &state.selected_model.as_ref().unwrap();
+                let (task, handle) = state.client.stream_completion(&state.history, model);
 
-                return state.client.stream_completion(&state.history, model);
+                state.is_streaming = Some(handle);
+                return task;
             }
         },
         // Handle streamed chunk
@@ -102,20 +112,60 @@ fn update(state: &mut AppState, message: Message) -> iced::Task<Message> {
                 }
             }
         },
+        Message::StreamCompleted => {
+            state.is_streaming = None;
+        },
+        Message::StreamStop => {
+            warn!("Stream aborted !");
+            if let Some(handle) = state.is_streaming.as_mut() {
+                handle.abort();
+                state.is_streaming = None;
+            } 
+        }
+        Message::Regenerate => {
+            state.history.pop();
+
+            // Add empty AI response to history
+            state.history.push((String::new(), true));
+
+            // Call stream_completion and return the task
+            let model = &state.selected_model.as_ref().unwrap();
+            let (task, handle) = state.client.stream_completion(&state.history, model);
+
+            state.is_streaming = Some(handle);
+            return task;
+        }
         _ => {}
     }
     iced::Task::none()
 }
 
-
+// Update UI method
 fn view(state: &AppState) -> Element<'_, Message> {
     // Text input
     let text_box = rounded_text_box(
         &state.text_content,
-         "Type something here...",
-          Message::TextInputChanged,
-          Message::EnterPressed,
-        );
+        "Type something here...",
+        Message::TextInputChanged,
+        Message::Generate,
+        state.is_streaming.is_none(),
+    );
+
+    let send_button =  toggle_button(
+        state.is_streaming.is_none(),
+        ("Send", Message::Generate),
+        ("Stop", Message::StreamStop),
+        theme::bottom(),
+        theme::error(),
+    );
+
+    let retry_button =  toggle_button(
+        state.is_streaming.is_none() && state.history.len() > 0,
+        ("Retry", Message::Regenerate),
+        ("...", Message::None),
+        theme::bubble_left(),
+        theme::background(),
+    );
 
     // Model selection
     let dropdown: ComboBox<'_, String, Message, Theme> = combo_box(
@@ -161,7 +211,7 @@ fn view(state: &AppState) -> Element<'_, Message> {
                 conversation
             ).spacing(10)
         )
-        .height(Length::FillPortion(4))
+        .height(Length::Fill)
         .width(Length::Fill)
         .style(|_| {
             container::Style {
@@ -176,14 +226,29 @@ fn view(state: &AppState) -> Element<'_, Message> {
         // Bottom
         container(column![
             // Model selection
-            container(dropdown).width(Length::FillPortion(2)).padding(Padding::from(10)),
+            container(dropdown).width(Length::FillPortion(2)).padding(Padding::from(10)).height(50),
 
-            // Text input
-            container(text_box).padding(Padding::from(10))
+            row![
+                // Text input
+                container(text_box).padding(Padding::from(10).right(5)),
+
+                // Send button and retry button
+                container(
+                    column![
+                        container(send_button).padding(5).height(Length::FillPortion(1)).width(Length::Fill),
+                        container(retry_button).padding(5).height(Length::FillPortion(1)).width(Length::Fill),
+                    ]
+                )
+                .padding(Padding::from(10).left(5))
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center)
+                .height(100)
+                .width(100)
+            ]
 
         ])
         .align_bottom(Length::Fill)
-        .height(Length::FillPortion(1))
+        .height(Length::Shrink)
         .style(|_| {
             container::Style {
                 background: Some(Background::Color(theme::bottom())),

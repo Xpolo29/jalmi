@@ -25,7 +25,7 @@ impl AppColors {
             text_input: Color::from_rgb(1.0, 1.0, 1.0),   // Pure white for text input background
             font_color: Color::from_rgb(0.15, 0.15, 0.2), // Dark navy for text
             background: Color::from_rgb(0.3, 0.3, 0.3), // Medium Gray (#717171), 
-            error: Color::from_rgb(1.0, 0.4, 0.8),        // Flashy pink (to identify when used incorrectly)
+            error: Color::from_rgb(0.8, 0.25, 0.25), // Darker soft red
             border: Color::from_rgb(0.3, 0.3, 0.4),       // Dark slate gray for borders
         }
     }
