@@ -23,7 +23,7 @@ impl Clone for LocalAiClient {
 }
 
 enum StreamState {
-    First,
+    First(Value, String),
     Iteration(BufReader<Box<dyn Read + Send>>), 
     End,
 }
@@ -113,7 +113,7 @@ impl LocalAiClient {
     
     
 
-    fn create_chat_request(history: Vec<(String, bool)>, model: String) -> Value {
+    fn create_chat_request(history: &Vec<(String, bool)>, model: &String) -> Value {
         // Convert history to messages format
         let messages: Vec<Value> = history.iter()
             .map(|(content, is_assistant)| {
@@ -136,25 +136,18 @@ impl LocalAiClient {
     }
 
     pub fn stream_completion(&self, history: &Vec<(String, bool)>, model: &String) -> (iced::Task<Message>, iced::task::Handle) {
+        // Construct the prompt
         let url = format!("{}/v1/chat/completions", self.base_url);
-        let history  = history.clone();
-        let model = model.clone();
+        let json = Self::create_chat_request(history, model);
 
         // Create a stream that will yield chunks from the response
         let stream = stream::unfold(
-            StreamState::First,
+            StreamState::First(json, url),
             move |state| {
-                let url = url.clone();
-                let model = model.clone();
-                let history = history.clone();
-                
                 async move {
                     match state {
-                        StreamState::First => {
+                        StreamState::First(json, url) => {
                             debug!("Stream begin");
-                            // Construct the prompt
-                            let json = Self::create_chat_request(history, model);
-        
                             // First call - make the HTTP request
                             match ureq::post(&url)
                                 .header("Content-Type", "application/json")

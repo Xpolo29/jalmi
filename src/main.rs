@@ -25,6 +25,22 @@ use env_logger::{Builder, Env};
 use std::env;
 use std::thread::sleep;
 
+use iced::futures;
+use std::future::Future;
+
+struct SmolExecutor;
+
+impl iced::Executor for SmolExecutor {
+    fn new() -> Result<Self, futures::io::Error> {
+        Ok(Self)
+    }
+
+    fn spawn(&self, future: impl Future<Output = ()> + Send + 'static) {
+        smol::spawn(future).detach();
+    }
+}
+
+
 struct AppState {
     text_content: Content,
     dropdown_state: combo_box::State<String>,
@@ -33,6 +49,7 @@ struct AppState {
     client: LocalAiClient,
     is_streaming: Option<Handle>,
     model_status: Option<ModelStatus>,
+    message_count: usize,
 }
 
 impl Default for AppState {
@@ -46,6 +63,7 @@ impl Default for AppState {
             client: LocalAiClient::new(),
             is_streaming: None,
             model_status: None,
+            message_count: 0,
         }
     }
 }
@@ -66,7 +84,6 @@ pub enum Message {
     LoadModel,
     CheckLoaded,
 }
-
 fn subscription(_: &AppState) -> Subscription<Message> {
     time::every(Duration::from_secs(10)).map(|_| Message::CheckLoaded)
 }
@@ -82,6 +99,7 @@ fn main() -> iced::Result {
             min_size: Some(Size::new(300.0, 400.0)), 
             ..Default::default()
         })
+        .executor::<SmolExecutor>()
         //.subscription(subscription)
         .run()
 }
@@ -125,12 +143,13 @@ fn update(state: &mut AppState, message: Message) -> iced::Task<Message> {
         // Handle streamed chunk
         Message::ReceivedChunk(chunk) => {
             // Append the chunk to the last AI response in history
-            
             if let Some((response, is_ai)) = state.history.last_mut() {
                 if *is_ai {
                     response.push_str(&chunk);
                 }
             }
+            state.message_count += 1;
+            trace!("Processed {} chunks at {:?}", state.message_count, std::time::Instant::now());
         },
         Message::StreamCompleted => {
             state.is_streaming = None;

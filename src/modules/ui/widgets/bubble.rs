@@ -7,12 +7,12 @@ use iced::alignment::Horizontal::{Left, Right};
 use super::super::theme;
 
 /// Creates a text bubble from the given string
-pub fn text_bubble<Message>(content: &str, align_left: bool) -> Container<'static, Message, Theme> 
+pub fn text_bubble<'a, Message>(content: &'a str, align_left: bool) -> Container<'a, Message, Theme> 
 where
     Message: 'static,
 {
     // Create the text widget with the content
-    let text = Text::new(content.to_string());
+    let text = Text::new(content);
 
     // Wrap the text in a container with bubble styling
     let bubble = container(text)
