@@ -68,6 +68,14 @@ impl LocalAiClient {
         Self {port, base_url }
     }
 
+    pub fn unload_models(&self) {
+        let url = &(self.base_url.clone() + "/unload");
+        match ureq::get(url).call() {
+            Ok(_) => info!("All models unloaded"),
+            Err(e) => warn!("Error unloading : {:?}", e)
+        };
+    }
+
     pub fn check_status(&self, model: &Option<String>) -> Option<ModelStatus> {
         if let Some(model_name) = model {
             let url = &(self.base_url.clone() + "/running");

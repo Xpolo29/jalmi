@@ -9,7 +9,7 @@ pub fn status_display<'a, Message>(model_status: &'a Option<ModelStatus>) -> Con
     let status_text = get_status(model_status);
     
     // Create the text widget
-    let text = Text::new(format!("   Status: {}  ", status_text));
+    let text = Text::new(format!("            Status: {}           ", status_text));
     
     // Create a container with rounded corners
     let status_box = container(text)

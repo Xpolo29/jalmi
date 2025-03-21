@@ -21,24 +21,9 @@ use modules::{
     llm::llm::{LocalAiClient, ModelStatus, is_model_active, get_status},
 };
 use log::{error, warn, info, debug, trace};
-use env_logger::{Builder, Env};
+
 use std::env;
 use std::thread::sleep;
-
-use iced::futures;
-use std::future::Future;
-
-struct SmolExecutor;
-
-impl iced::Executor for SmolExecutor {
-    fn new() -> Result<Self, futures::io::Error> {
-        Ok(Self)
-    }
-
-    fn spawn(&self, future: impl Future<Output = ()> + Send + 'static) {
-        smol::spawn(future).detach();
-    }
-}
 
 
 struct AppState {
@@ -84,9 +69,24 @@ pub enum Message {
     LoadModel,
     CheckLoaded,
 }
-fn subscription(_: &AppState) -> Subscription<Message> {
-    time::every(Duration::from_secs(10)).map(|_| Message::CheckLoaded)
+
+use std::time::Instant;
+
+fn timer_subscription(_: &AppState) -> Subscription<Message> {
+    Subscription::run(|| {
+        async_stream::stream! {
+            let mut last_tick = Instant::now();
+            loop {
+                let now = Instant::now();
+                if now.duration_since(last_tick) >= Duration::from_secs(2) {
+                    yield Message::CheckLoaded;
+                    last_tick = now;
+                }
+            }
+        }
+    })
 }
+
 
 fn main() -> iced::Result {
     env::set_var("RUST_LOG", "jalmi=trace,none");
@@ -99,14 +99,13 @@ fn main() -> iced::Result {
             min_size: Some(Size::new(300.0, 400.0)), 
             ..Default::default()
         })
-        .executor::<SmolExecutor>()
-        //.subscription(subscription)
+        .subscription(timer_subscription)
         .run()
 }
 
 // Update Model method
 fn update(state: &mut AppState, message: Message) -> iced::Task<Message> {
-    debug!("Received message {:?}", message);
+    trace!("Received message {:?}", message);
     match message {
         // Text input
         Message::TextInputChanged(action) => {
@@ -149,7 +148,6 @@ fn update(state: &mut AppState, message: Message) -> iced::Task<Message> {
                 }
             }
             state.message_count += 1;
-            trace!("Processed {} chunks at {:?}", state.message_count, std::time::Instant::now());
         },
         Message::StreamCompleted => {
             state.is_streaming = None;
@@ -168,20 +166,20 @@ fn update(state: &mut AppState, message: Message) -> iced::Task<Message> {
         },
         Message::UnloadModel => {
             if is_model_active(&state.model_status) {
-               ; 
+               state.client.unload_models();
             }
         },
         // Load if not streaming and model not loaded and selected model is not null
         Message::LoadModel => {
             let model = &state.selected_model.as_ref().unwrap();
             let (task, handle) = state.client.stream_completion(&state.history, model);
+            state.is_streaming = Some(handle);
 
             let timeout_task = Task::perform(
                 async move {
-                    sleep(Duration::from_millis(100));
-                    handle.abort();
+                    sleep(Duration::from_millis(200));
                 },
-                |_| Message::None
+                |_| Message::StreamStop
             );
         
             return Task::batch(vec![
