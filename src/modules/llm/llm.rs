@@ -28,6 +28,35 @@ enum StreamState {
 
 use log::{error, warn, info, debug, trace};
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum ModelStatus {
+    Ready,
+    Starting,
+    Stopping,
+    Stopped
+}
+
+pub fn is_model_active(option: Option<ModelStatus>) -> bool {
+    if let Some(status) = option{
+        match status {
+            ModelStatus::Ready => return true,
+            _ => return false
+        }
+    }
+    false
+}
+
+pub fn get_status(status: Option<ModelStatus>) -> String {
+    match status {
+        Some(model_status) => match model_status {
+            ModelStatus::Ready => "Ready".to_string(),
+            ModelStatus::Starting => "Starting".to_string(),
+            ModelStatus::Stopping => "Stopping".to_string(),
+            ModelStatus::Stopped => "Stopped".to_string(),
+        },
+        None => "Unknown".to_string(), // or any default value you prefer
+    }
+}
 
 impl LocalAiClient {
     pub fn new() -> Self {
@@ -36,6 +65,54 @@ impl LocalAiClient {
         info!("Llm server at {}:{}", base_url, port);
         Self {port, base_url }
     }
+
+    pub fn check_status(self, model: Option<String>) -> Option<ModelStatus> {
+        // If no model specified, return None
+        let model_name = model?;
+        let url = &(self.base_url.clone() + "/running");
+    
+        // Make the request and handle any errors
+        let response = match ureq::get(url).call() {
+            Ok(resp) => resp,
+            Err(_) => return Some(ModelStatus::Stopped)
+        };
+    
+        // Parse the JSON responserun_with(
+        let (_, body) = response.into_parts();
+        let reader = BufReader::new(body.into_reader());
+        let json: Value = match serde_json::from_reader(reader) {
+            Ok(j) => j,
+            Err(_) => return Some(ModelStatus::Stopped)
+        };
+    
+        // Get the running array
+        let running = match json.get("running").and_then(|v| v.as_array()) {
+            Some(arr) => arr,
+            None => return Some(ModelStatus::Stopped)
+        };
+    
+        // Check if our model is in the running array and ready
+        for item in running {
+            if let Some(loaded_model) = item.get("model").and_then(|v| v.as_str()) {
+                // If this is our model
+                if loaded_model == model_name {
+                    // Check if it's ready
+                    if let Some("ready") = item.get("state").and_then(|v| v.as_str()) {
+                        return Some(ModelStatus::Ready);
+                    } else {
+                        return Some(ModelStatus::Stopped);
+                    }
+                }
+            }
+        }
+    
+        // Model not found in running array
+        Some(ModelStatus::Stopped)
+    }
+    
+    
+    
+    
 
     fn create_chat_request(history: Vec<(String, bool)>, model: String) -> Value {
         // Convert history to messages format

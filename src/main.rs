@@ -1,10 +1,11 @@
 mod modules;
 
 use iced::{
-    border::Radius, overlay::menu, task::{self, Handle}, widget::{
-        column, combo_box, container, row, scrollable, text_editor::{Action, Content}, text_input::{self, Status}, Column, ComboBox
-    }, window, Alignment, Background, Border, Element, Length, Padding, Settings, Size, Task, Theme
+    border::Radius, overlay::menu, task::{self, Handle}, time::{self, Duration}, widget::{
+        column, combo_box, container, row, scrollable, text_editor::{Action, Content}, text_input::{self, Status}, Column, ComboBox, Text
+    }, window::{self, Mode}, Alignment, Background, Border, Element, Length, Padding, Settings, Size, Subscription, Task, Theme
 };
+
 
 use modules::{
     ui::{
@@ -12,15 +13,17 @@ use modules::{
             bubble::text_bubble,
             text_box::rounded_text_box,
             toggle_button::toggle_button,
+            status::status_display,
         },
         theme,
     },
     config::config,
-    llm::llm::LocalAiClient,
+    llm::llm::{LocalAiClient, ModelStatus, is_model_active, get_status},
 };
 use log::{error, warn, info, debug, trace};
 use env_logger::{Builder, Env};
 use std::env;
+use std::thread::sleep;
 
 struct AppState {
     text_content: Content,
@@ -29,6 +32,7 @@ struct AppState {
     history: Vec<(String, bool)>,
     client: LocalAiClient,
     is_streaming: Option<Handle>,
+    model_status: Option<ModelStatus>,
 }
 
 impl Default for AppState {
@@ -41,20 +45,25 @@ impl Default for AppState {
             history: Vec::new(),
             client: LocalAiClient::new(),
             is_streaming: None,
+            model_status: None,
         }
     }
 }
 
 #[derive(Clone, Debug)]
 pub enum Message {
+    None,
     TextInputChanged(Action),
     OptionSelected(String),
     Generate,
+    Request,
     ReceivedChunk(String),
     StreamCompleted,
     StreamStop,
     Regenerate,
-    None,
+    UnloadModel, 
+    LoadModel,
+    CheckLoaded,
 }
 
 fn main() -> iced::Result {
@@ -67,7 +76,8 @@ fn main() -> iced::Result {
         .window(window::Settings {
             min_size: Some(Size::new(300.0, 400.0)), 
             ..Default::default()
-        }).run()
+        })
+        .run()
 }
 
 // Update Model method
@@ -76,14 +86,25 @@ fn update(state: &mut AppState, message: Message) -> iced::Task<Message> {
     match message {
         // Text input
         Message::TextInputChanged(action) => {
-            
             state.text_content.perform(action);
         },
         // Model selection
         Message::OptionSelected(selected) => {
             state.selected_model = Some(selected);
+            return Task::done(Message::CheckLoaded);
         },
-        // Enter pressed
+        Message::Request => {
+            // Add empty AI response to history
+            state.history.push((String::new(), true));
+            
+            // Call stream_completion and return the task
+            let model = &state.selected_model.as_ref().unwrap();
+            let (task, handle) = state.client.stream_completion(&state.history, model);
+
+            state.is_streaming = Some(handle);
+            return task;
+        },
+        // Enter pressed for example
         Message::Generate => {
             let text = state.text_content.text();
             
@@ -92,15 +113,7 @@ fn update(state: &mut AppState, message: Message) -> iced::Task<Message> {
                 state.history.push((text.to_string(), false));
                 state.text_content = Content::new();
                 
-                // Add empty AI response to history
-                state.history.push((String::new(), true));
-                
-                // Call stream_completion and return the task
-                let model = &state.selected_model.as_ref().unwrap();
-                let (task, handle) = state.client.stream_completion(&state.history, model);
-
-                state.is_streaming = Some(handle);
-                return task;
+                return Task::done(Message::Request)            
             }
         },
         // Handle streamed chunk
@@ -125,16 +138,42 @@ fn update(state: &mut AppState, message: Message) -> iced::Task<Message> {
         Message::Regenerate => {
             state.history.pop();
 
-            // Add empty AI response to history
-            state.history.push((String::new(), true));
-
-            // Call stream_completion and return the task
+            return Task::done(Message::Request)            
+        },
+        Message::UnloadModel => {
+            if is_model_active(state.model_status.clone()) {
+                
+            }
+        },
+        // Load if not streaming and model not loaded and selected model is not null
+        Message::LoadModel => {
             let model = &state.selected_model.as_ref().unwrap();
             let (task, handle) = state.client.stream_completion(&state.history, model);
 
-            state.is_streaming = Some(handle);
-            return task;
-        }
+            let timeout_task = Task::perform(
+                async move {
+                    sleep(Duration::from_millis(100));
+                    handle.abort();
+                },
+                |_| Message::None
+            );
+        
+            return Task::batch(vec![
+                task,
+                timeout_task
+            ])
+        },
+        Message::CheckLoaded => {
+            debug!("Cheking if model is loaded !");
+            let client = state.client.clone();
+            let model = state.selected_model.clone();
+
+            
+            let status = client.clone().check_status(model.clone());
+            if status != state.model_status{
+                state.model_status = status;
+            }
+        },
         _ => {}
     }
     iced::Task::none()
@@ -142,7 +181,8 @@ fn update(state: &mut AppState, message: Message) -> iced::Task<Message> {
 
 // Update UI method
 fn view(state: &AppState) -> Element<'_, Message> {
-    // Text input
+    trace!("VIEW");
+    // text input
     let text_box = rounded_text_box(
         &state.text_content,
         "Type something here...",
@@ -151,6 +191,7 @@ fn view(state: &AppState) -> Element<'_, Message> {
         state.is_streaming.is_none(),
     );
 
+    // Send query to llm button
     let send_button =  toggle_button(
         state.is_streaming.is_none(),
         ("Send", Message::Generate),
@@ -159,11 +200,24 @@ fn view(state: &AppState) -> Element<'_, Message> {
         theme::error(),
     );
 
+    // Retry button
     let retry_button =  toggle_button(
         state.is_streaming.is_none() && state.history.len() > 0,
         ("Retry", Message::Regenerate),
         ("...", Message::None),
         theme::bubble_left(),
+        theme::background(),
+    );
+
+    // Unload models button
+    // Load if not streaming and model not loaded and selected model is not null
+    let unload_button =  toggle_button(
+        state.is_streaming.is_none() 
+            && !is_model_active(state.model_status.clone())
+            && state.selected_model.is_some(),
+        ("Load", Message::LoadModel),
+        (if state.selected_model.is_some() {"Unload"} else {"Select a model first"}, Message::UnloadModel),
+        theme::model(),
         theme::background(),
     );
 
@@ -194,16 +248,18 @@ fn view(state: &AppState) -> Element<'_, Message> {
         }
     });
 
+    // Model status display
+    let status: container::Container<'_, Message> = status_display(state.model_status.clone());
+
     // Conversation bubbles
     let mut bubbles = Vec::new();
-    
     for (msg, left) in (&state.history).into_iter() {
         let bubble = text_bubble(msg, *left);
         bubbles.push(bubble.into());
     }
-    
     let conversation = Column::with_children(bubbles);
 
+    // Main view architecture
     column![
         // Top
         container(
@@ -226,7 +282,15 @@ fn view(state: &AppState) -> Element<'_, Message> {
         // Bottom
         container(column![
             // Model selection
-            container(dropdown).width(Length::FillPortion(2)).padding(Padding::from(10)).height(50),
+            container(
+                row![
+                    container(dropdown).padding(Padding::from(0).right(10)).height(Length::Fill),
+                    status.padding(Padding::from(0).right(10)).height(Length::Fill),
+                    container(unload_button).align_x(Alignment::Center).height(Length::Fill).padding(Padding::from(0).left(10).right(10)),
+                ]
+            )
+            .padding(10)
+            .height(50),
 
             row![
                 // Text input
