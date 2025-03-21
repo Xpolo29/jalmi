@@ -4,9 +4,9 @@ use iced::{
 use iced::border::Radius;
 use crate::{ModelStatus, get_status, theme};
 
-pub fn status_display<'a, Message>(model_status: Option<ModelStatus>) -> Container<'static, Message, Theme> {
+pub fn status_display<'a, Message>(model_status: &'a Option<ModelStatus>) -> Container<'a, Message, Theme> {
     // Get the status text
-    let status_text = get_status(model_status.clone());
+    let status_text = get_status(model_status);
     
     // Create the text widget
     let text = Text::new(format!("   Status: {}  ", status_text));

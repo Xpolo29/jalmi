@@ -3,7 +3,7 @@ mod modules;
 use iced::{
     border::Radius, overlay::menu, task::{self, Handle}, time::{self, Duration}, widget::{
         column, combo_box, container, row, scrollable, text_editor::{Action, Content}, text_input::{self, Status}, Column, ComboBox, Text
-    }, window::{self, Mode}, Alignment, Background, Border, Element, Length, Padding, Settings, Size, Subscription, Task, Theme
+    }, window::{self, Mode}, Alignment, Application, Background, Border, Element, Length, Padding, Settings, Size, Subscription, Task, Theme
 };
 
 
@@ -50,6 +50,7 @@ impl Default for AppState {
     }
 }
 
+
 #[derive(Clone, Debug)]
 pub enum Message {
     None,
@@ -66,6 +67,10 @@ pub enum Message {
     CheckLoaded,
 }
 
+fn subscription(_: &AppState) -> Subscription<Message> {
+    time::every(Duration::from_secs(10)).map(|_| Message::CheckLoaded)
+}
+
 fn main() -> iced::Result {
     env::set_var("RUST_LOG", "jalmi=trace,none");
     colog::init();
@@ -77,12 +82,13 @@ fn main() -> iced::Result {
             min_size: Some(Size::new(300.0, 400.0)), 
             ..Default::default()
         })
+        //.subscription(subscription)
         .run()
 }
 
 // Update Model method
 fn update(state: &mut AppState, message: Message) -> iced::Task<Message> {
-    // debug!("Received message {:?}", message);
+    debug!("Received message {:?}", message);
     match message {
         // Text input
         Message::TextInputChanged(action) => {
@@ -98,7 +104,7 @@ fn update(state: &mut AppState, message: Message) -> iced::Task<Message> {
             state.history.push((String::new(), true));
             
             // Call stream_completion and return the task
-            let model = &state.selected_model.as_ref().unwrap();
+            let model = &state.selected_model.as_deref().unwrap().to_string();
             let (task, handle) = state.client.stream_completion(&state.history, model);
 
             state.is_streaming = Some(handle);
@@ -119,6 +125,7 @@ fn update(state: &mut AppState, message: Message) -> iced::Task<Message> {
         // Handle streamed chunk
         Message::ReceivedChunk(chunk) => {
             // Append the chunk to the last AI response in history
+            
             if let Some((response, is_ai)) = state.history.last_mut() {
                 if *is_ai {
                     response.push_str(&chunk);
@@ -141,8 +148,8 @@ fn update(state: &mut AppState, message: Message) -> iced::Task<Message> {
             return Task::done(Message::Request)            
         },
         Message::UnloadModel => {
-            if is_model_active(state.model_status.clone()) {
-                
+            if is_model_active(&state.model_status) {
+               ; 
             }
         },
         // Load if not streaming and model not loaded and selected model is not null
@@ -164,15 +171,8 @@ fn update(state: &mut AppState, message: Message) -> iced::Task<Message> {
             ])
         },
         Message::CheckLoaded => {
-            debug!("Cheking if model is loaded !");
-            let client = state.client.clone();
-            let model = state.selected_model.clone();
-
-            
-            let status = client.clone().check_status(model.clone());
-            if status != state.model_status{
-                state.model_status = status;
-            }
+            let status = state.client.check_status(&state.selected_model);
+            state.model_status = status;
         },
         _ => {}
     }
@@ -181,7 +181,7 @@ fn update(state: &mut AppState, message: Message) -> iced::Task<Message> {
 
 // Update UI method
 fn view(state: &AppState) -> Element<'_, Message> {
-    trace!("VIEW");
+    //trace!("VIEW");
     // text input
     let text_box = rounded_text_box(
         &state.text_content,
@@ -213,7 +213,7 @@ fn view(state: &AppState) -> Element<'_, Message> {
     // Load if not streaming and model not loaded and selected model is not null
     let unload_button =  toggle_button(
         state.is_streaming.is_none() 
-            && !is_model_active(state.model_status.clone())
+            && !is_model_active(&state.model_status)
             && state.selected_model.is_some(),
         ("Load", Message::LoadModel),
         (if state.selected_model.is_some() {"Unload"} else {"Select a model first"}, Message::UnloadModel),
@@ -249,7 +249,7 @@ fn view(state: &AppState) -> Element<'_, Message> {
     });
 
     // Model status display
-    let status: container::Container<'_, Message> = status_display(state.model_status.clone());
+    let status: container::Container<'_, Message> = status_display(&state.model_status);
 
     // Conversation bubbles
     let mut bubbles = Vec::new();

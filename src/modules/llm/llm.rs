@@ -1,3 +1,4 @@
+use iced::window::Mode;
 use ureq;
 use std::io::{BufRead, BufReader, Read};
 use serde_json::{json, Value};
@@ -13,6 +14,7 @@ pub struct LocalAiClient {
 
 impl Clone for LocalAiClient {
     fn clone(&self) -> Self {
+        trace!("Cloning client !");
         Self {
             port: self.port,
             base_url: self.base_url.clone(),
@@ -36,7 +38,7 @@ pub enum ModelStatus {
     Stopped
 }
 
-pub fn is_model_active(option: Option<ModelStatus>) -> bool {
+pub fn is_model_active(option: &Option<ModelStatus>) -> bool {
     if let Some(status) = option{
         match status {
             ModelStatus::Ready => return true,
@@ -46,7 +48,7 @@ pub fn is_model_active(option: Option<ModelStatus>) -> bool {
     false
 }
 
-pub fn get_status(status: Option<ModelStatus>) -> String {
+pub fn get_status(status: &Option<ModelStatus>) -> String {
     match status {
         Some(model_status) => match model_status {
             ModelStatus::Ready => "Ready".to_string(),
@@ -54,7 +56,7 @@ pub fn get_status(status: Option<ModelStatus>) -> String {
             ModelStatus::Stopping => "Stopping".to_string(),
             ModelStatus::Stopped => "Stopped".to_string(),
         },
-        None => "Unknown".to_string(), // or any default value you prefer
+        None => "Unknown".to_string(), 
     }
 }
 
@@ -66,47 +68,44 @@ impl LocalAiClient {
         Self {port, base_url }
     }
 
-    pub fn check_status(self, model: Option<String>) -> Option<ModelStatus> {
-        // If no model specified, return None
-        let model_name = model?;
-        let url = &(self.base_url.clone() + "/running");
-    
-        // Make the request and handle any errors
-        let response = match ureq::get(url).call() {
-            Ok(resp) => resp,
-            Err(_) => return Some(ModelStatus::Stopped)
-        };
-    
-        // Parse the JSON responserun_with(
-        let (_, body) = response.into_parts();
-        let reader = BufReader::new(body.into_reader());
-        let json: Value = match serde_json::from_reader(reader) {
-            Ok(j) => j,
-            Err(_) => return Some(ModelStatus::Stopped)
-        };
-    
-        // Get the running array
-        let running = match json.get("running").and_then(|v| v.as_array()) {
-            Some(arr) => arr,
-            None => return Some(ModelStatus::Stopped)
-        };
-    
-        // Check if our model is in the running array and ready
-        for item in running {
-            if let Some(loaded_model) = item.get("model").and_then(|v| v.as_str()) {
-                // If this is our model
-                if loaded_model == model_name {
-                    // Check if it's ready
-                    if let Some("ready") = item.get("state").and_then(|v| v.as_str()) {
-                        return Some(ModelStatus::Ready);
-                    } else {
-                        return Some(ModelStatus::Stopped);
+    pub fn check_status(&self, model: &Option<String>) -> Option<ModelStatus> {
+        if let Some(model_name) = model {
+            let url = &(self.base_url.clone() + "/running");
+        
+            // Make the request and handle any errors
+            let response = match ureq::get(url).call() {
+                Ok(resp) => resp,
+                Err(_) => return Some(ModelStatus::Stopped)
+            };
+        
+            // Parse the JSON responserun_with(
+            let (_, body) = response.into_parts();
+            let reader = BufReader::new(body.into_reader());
+            let json: Value = match serde_json::from_reader(reader) {
+                Ok(j) => j,
+                Err(_) => return Some(ModelStatus::Stopped)
+            };
+        
+            // Get the running array
+            let running = match json.get("running").and_then(|v| v.as_array()) {
+                Some(arr) => arr,
+                None => return Some(ModelStatus::Stopped)
+            };
+        
+            // Check if our model is in the running array and ready
+            for item in running {
+                if let Some(loaded_model) = item.get("model").and_then(|v| v.as_str()) {
+                    if loaded_model == model_name {
+                        if let Some("ready") = item.get("state").and_then(|v| v.as_str()) {
+                            return Some(ModelStatus::Ready);
+                        } else {
+                            return Some(ModelStatus::Stopped);
+                        }
                     }
                 }
             }
         }
     
-        // Model not found in running array
         Some(ModelStatus::Stopped)
     }
     
@@ -143,14 +142,11 @@ impl LocalAiClient {
 
         // Create a stream that will yield chunks from the response
         let stream = stream::unfold(
-            // Initial state: None means we haven't started yet
             StreamState::First,
-
             move |state| {
-
                 let url = url.clone();
                 let model = model.clone();
-                let history  = history.clone();
+                let history = history.clone();
                 
                 async move {
                     match state {
@@ -158,11 +154,11 @@ impl LocalAiClient {
                             debug!("Stream begin");
                             // Construct the prompt
                             let json = Self::create_chat_request(history, model);
-
+        
                             // First call - make the HTTP request
                             match ureq::post(&url)
-                            .header("Content-Type", "application/json")
-                            .send_json(json)
+                                .header("Content-Type", "application/json")
+                                .send_json(json)
                             {
                                 Ok(response) => {
                                     // Convert the response body into an owned reader
@@ -170,17 +166,23 @@ impl LocalAiClient {
                                     let reader: Box<dyn Read + Send> = Box::new(body.into_reader());
                                     let mut buf_reader = BufReader::new(reader);
                                     
-                                    // Read the first line
-                                    let mut line_buffer = String::new();
-                                    match buf_reader.read_line(&mut line_buffer) {
-                                        Ok(bytes) if bytes > 0 => {
-                                            // Process the line and continue
-                                            let message = Self::process_line(&line_buffer);
-                                            Some((message,  StreamState::Iteration(buf_reader)))
-                                        },
-                                        _ => {
-                                            // No data or error
-                                            Some((Message::StreamCompleted, StreamState::End))
+                                    // Read lines until we find a valid message
+                                    loop {
+                                        let mut line_buffer = String::new();
+                                        match buf_reader.read_line(&mut line_buffer) {
+                                            Ok(bytes) if bytes > 0 => {
+                                                // Process the line
+                                                if let Some(message) = Self::process_line(&line_buffer) {
+                                                    // Found a valid message, return it
+                                                    return Some((message, StreamState::Iteration(buf_reader)));
+                                                }
+                                                // No valid message, continue reading
+                                                continue;
+                                            },
+                                            _ => {
+                                                // No data or error
+                                                return Some((Message::StreamCompleted, StreamState::End));
+                                            }
                                         }
                                     }
                                 },
@@ -190,17 +192,23 @@ impl LocalAiClient {
                             }
                         },
                         StreamState::Iteration(mut buf_reader) => {
-                            // Read the next line
-                            let mut line_buffer = String::new();
-                            match buf_reader.read_line(&mut line_buffer) {
-                                Ok(bytes) if bytes > 0 => {
-                                    // Process the line and continue
-                                    let message = Self::process_line(&line_buffer);
-                                    Some((message, StreamState::Iteration(buf_reader)))
-                                },
-                                _ => {
-                                    // No more data or error
-                                    Some((Message::StreamCompleted, StreamState::End))
+                            // Read lines until we find a valid message
+                            loop {
+                                let mut line_buffer = String::new();
+                                match buf_reader.read_line(&mut line_buffer) {
+                                    Ok(bytes) if bytes > 0 => {
+                                        // Process the line
+                                        if let Some(message) = Self::process_line(&line_buffer) {
+                                            // Found a valid message, return it
+                                            return Some((message, StreamState::Iteration(buf_reader)));
+                                        }
+                                        // No valid message, continue reading
+                                        continue;
+                                    },
+                                    _ => {
+                                        // No more data or error
+                                        return Some((Message::StreamCompleted, StreamState::End));
+                                    }
                                 }
                             }
                         },
@@ -212,6 +220,7 @@ impl LocalAiClient {
                 }
             }
         );
+        
 
         // Create a Task from the stream
         let task = iced::Task::run(stream, |msg| msg);
@@ -220,26 +229,34 @@ impl LocalAiClient {
     }
     
     // Helper function to process a line from the response
-    fn process_line(line: &str) -> Message {
-        if line.starts_with("data: ") {
-            let json_str = &line[6..];
-            
-            if json_str.trim() == "[DONE]" {
-                return Message::StreamCompleted;
-            }
-            
-            if let Ok(json) = serde_json::from_str::<Value>(json_str) {
-                if let Some(content) = json
-                    .get("choices")
-                    .and_then(|choices| choices.get(0))
-                    .and_then(|choice| choice.get("delta"))
-                    .and_then(|delta| delta.get("content"))
-                    .and_then(|content| content.as_str())
-                {
-                    return Message::ReceivedChunk(content.to_string());
+    fn process_line(line: &str) -> Option<Message> {
+        // Skip empty lines and lines that don't start with "data: "
+        if !line.starts_with("data: ") || line.trim() == "data: " {
+            return None;
+        }
+        
+        let json_str = &line[6..];
+        
+        if json_str.trim() == "[DONE]" {
+            return Some(Message::StreamCompleted);
+        }
+        
+        if let Ok(json) = serde_json::from_str::<Value>(json_str) {
+            if let Some(content) = json
+                .get("choices")
+                .and_then(|choices| choices.get(0))
+                .and_then(|choice| choice.get("delta"))
+                .and_then(|delta| delta.get("content"))
+                .and_then(|content| content.as_str())
+            {
+                if !content.is_empty() {
+                    return Some(Message::ReceivedChunk(content.to_string()));
                 }
             }
         }
-        Message::ReceivedChunk(String::new())
+        
+        // Skip all other lines by returning None
+        None
     }
+    
 }
