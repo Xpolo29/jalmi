@@ -18,7 +18,7 @@ use modules::{
         theme,
     },
     config::config,
-    llm::llm::{LocalAiClient, ModelStatus, is_model_active, get_status},
+    llm::llm::{LocalAiClient, ModelStatus, is_model_active, get_status, timer_subscription},
 };
 use log::{error, warn, info, debug, trace};
 
@@ -53,7 +53,6 @@ impl Default for AppState {
     }
 }
 
-
 #[derive(Clone, Debug)]
 pub enum Message {
     None,
@@ -68,23 +67,6 @@ pub enum Message {
     UnloadModel, 
     LoadModel,
     CheckLoaded,
-}
-
-use std::time::Instant;
-
-fn timer_subscription(_: &AppState) -> Subscription<Message> {
-    Subscription::run(|| {
-        async_stream::stream! {
-            let mut last_tick = Instant::now();
-            loop {
-                let now = Instant::now();
-                if now.duration_since(last_tick) >= Duration::from_secs(2) {
-                    yield Message::CheckLoaded;
-                    last_tick = now;
-                }
-            }
-        }
-    })
 }
 
 
@@ -171,7 +153,7 @@ fn update(state: &mut AppState, message: Message) -> iced::Task<Message> {
         },
         // Load if not streaming and model not loaded and selected model is not null
         Message::LoadModel => {
-            let model = &state.selected_model.as_ref().unwrap();
+            let model = state.selected_model.as_ref().unwrap();
             let (task, handle) = state.client.stream_completion(&state.history, model);
             state.is_streaming = Some(handle);
 
@@ -282,7 +264,8 @@ fn view(state: &AppState) -> Element<'_, Message> {
         container(
             scrollable(
                 conversation
-            ).spacing(10)
+            )
+            .spacing(10)
         )
         .height(Length::Fill)
         .width(Length::Fill)

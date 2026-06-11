@@ -7,6 +7,9 @@ use iced::futures::stream;
 use crate::config;
 use crate::Message;
 
+use std::time::Instant;
+use crate::{AppState, Subscription, Duration};
+
 pub struct LocalAiClient {
     port: u16,
     base_url: String,
@@ -60,10 +63,32 @@ pub fn get_status(status: &Option<ModelStatus>) -> String {
     }
 }
 
+
+pub fn timer_subscription(_: &AppState) -> Subscription<Message> {
+    Subscription::run(|| {
+        async_stream::stream! {
+            let mut last_tick = Instant::now();
+            loop {
+                let now = Instant::now();
+                if now.duration_since(last_tick) >= Duration::from_secs(2) {
+                    yield Message::CheckLoaded;
+                    last_tick = now;
+                }
+            }
+        }
+    })
+}
+
 impl LocalAiClient {
     pub fn new() -> Self {
-        let port: u16 = config::get_port().unwrap();
-        let base_url = format!("http://localhost:{}", port);
+        let port: u16 = match config::get_port() {
+            Some(port) => port,
+            None => {
+                error!("Could not get port of llama-swap... Is it running ?");
+                std::process::exit(1); 
+            }
+        };
+                let base_url = format!("http://localhost:{}", port);
         info!("Llm server at {}:{}", base_url, port);
         Self {port, base_url }
     }
